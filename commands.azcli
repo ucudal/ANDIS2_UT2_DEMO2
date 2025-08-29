@@ -1,0 +1,289 @@
+# Requerimientos
+# - Python
+# - Docker
+# - Minikube
+# - K6
+
+# En esta demo se crea en Docker:
+#   Un contenedor en Docker para las bases de datos de órdenes
+#   Otro para la de usuarios
+#   Otro para la de productos
+# Luego se crea un clúster de Kubernets con Minikube para
+#   El servicio de usuarios
+#   El de productos
+#   El de órdenes
+#   Un API Gateway con Nginx que provee un único endpoint para acceder a los
+#   otros tres servicios
+
+# ==============================================================================
+
+# Inicia Docker si no está iniciado
+docker desktop start
+
+# Levanta las bases de datos en Docker, que no están en el clúster de Kubernets
+docker-compose up -d
+
+# Prueba si los contenedores están funcionando correctamente; la contraseña, en
+# caso de que te la pida, está en el archivo .env de cada base de datos
+docker exec -it andis2_ut2_demo2-orders-db-1 mysql -u user -p ordersdb -e "SELECT * FROM orders;"
+docker exec -it andis2_ut2_demo2-users-db-1 psql -h localhost -p 5432 -U usersusr -d usersdb -c "SELECT * FROM users;"
+docker exec -it andis2_ut2_demo2-products-db-1 mongosh "mongodb://productsusr:Pa55w0rd@localhost:27017/productsdb" --eval "db.products.find().pretty()"
+
+# Iniciar Kubernets; esperar el mensaje "Done! kubectl is now configured to use 'minikube'..."
+minikube start
+
+# Configurar que los comandos Docker usen el entorno de Docker interno de Minikube
+eval $(minikube -p minikube docker-env)
+
+# Crear las imágenes en caso de que no estuvieran creadas
+docker build -t orders-service:latest ./orders-service
+docker build -t products-service:latest ./products-service
+docker build -t users-service:latest ./users-service
+
+# Levantar todos los servicios
+kubectl create configmap nginx-config --from-file=nginx.conf=api-gateway/ngixconf/ngix.conf
+
+kubectl apply -f users-service/users-deployment.yaml
+kubectl apply -f users-service/users-service.yaml
+kubectl apply -f products-service/products-deployment.yaml
+kubectl apply -f products-service/products-service.yaml
+kubectl apply -f orders-service/orders-deployment.yaml
+kubectl apply -f orders-service/orders-service.yaml
+kubectl apply -f api-gateway/api-gateway-deployment.yaml
+kubectl apply -f api-gateway/api-gateway-service.yaml
+
+# Verificar el despliegue: todos los pods deben estar en estado "Running"
+kubectl get pods
+kubectl get services
+
+# Cada uno de los siguientes comandos se debe ejecutarse en una nueva terminal,
+# para configurar el reenvío de puertos para acceder a los servicios desde
+# localhost
+kubectl port-forward service/orders-service 9000:8000
+kubectl port-forward service/products-service 9001:8000
+kubectl port-forward service/users-service 9002:8000
+kubectl port-forward svc/api-gateway 8080:80
+
+# Probar el acceso a los endpoints directamente en cada servicio
+curl http://localhost:9000/orders/
+curl http://localhost:9001/products/
+curl http://localhost:9002/users/
+curl http://localhost:9000/orders/user/1
+
+# Probar el acceso a los endpoints a través del API Gateway
+curl http://localhost:8080/orders/
+curl http://localhost:8080/products/
+curl http://localhost:8080/users/
+curl http://localhost:8080/orders/user/1
+
+# Abrir el dashboard de Minikube en el navegador; ordena los pods por nombre
+# para facilitar el análisis
+minikube dashboard
+
+# En otra terminal, haz una prueba de carga con K6. La prueba dura dos minutos.
+# Mira el comportamiento de los pods en el dashboard. Los resultados de la
+# prueba aparecen al final del archivo ./k6/orders-test-resultados-iniciales.txt
+k6 run k6/orders-test.js > k6/orders-test-resultados-iniciales.txt
+
+# Habilitar métricas y auto-escalado al llegar al 50% de uso de CPU hasta 10
+# réplicas
+kubectl autoscale deployment orders-service --cpu-percent=50 --min=1 --max=10
+kubectl autoscale deployment products-service --cpu-percent=50 --min=1 --max=10
+kubectl autoscale deployment users-service --cpu-percent=50 --min=1 --max=10
+
+# Repite la prueba de carga con K6; mira el comportamiento de los pods en el
+# dashboard; deberías ver cómo se crean más réplicas del servicio de órdenes
+# cuando la carga aumenta
+k6 run k6/orders-test.js > k6/orders-test-resultados-50.txt
+
+# Es probable que veas un valor mayor de http_req_failed que en la primera
+# prueba; esto es porque en este ambiente de prueba, Kubernets tarda en levantar
+# los pods adicionales, y durante ese tiempo K6 sigue enviando solicitudes que
+# fallan. Has nuevamente la prueba, ahora que los pods adicionales ya están
+# todos levantados, y analiza las diferencias.
+k6 run k6/orders-test.js > k6/orders-test-resultados-50.txt
+
+# Compara los resultados de las dos pruebas de carga; mira especialmente los
+# valores de http_req_duration y http_reqs
+
+# Cambiar el auto-escalado para que se active al llegar al 10% de uso de CPU
+# hasta 20 réplicas
+kubectl delete hpa orders-service
+kubectl delete hpa products-service
+kubectl delete hpa users-service
+kubectl autoscale deployment orders-service --cpu-percent=10 --min=1 --max=20
+kubectl autoscale deployment products-service --cpu-percent=10 --min=1 --max=20
+kubectl autoscale deployment users-service --cpu-percent=10 --min=1 --max=20
+
+# Repite la prueba de carga con K6; mira el comportamiento de los pods en el
+# dashboard; deberías ver cómo se crean más réplicas del servicio de órdenes
+# cuando la carga aumenta
+k6 run k6/orders-test.js > k6/orders-test-resultados-10.txt
+
+# Compara nuevamente los resultados de la primera y la última prueba de carga;
+# mira especialmente los valores de http_req_duration y http_reqs
+
+# Restablecer el número de réplicas a 3 y eliminar el auto-escalado
+kubectl delete hpa orders-service
+kubectl delete hpa products-service
+kubectl delete hpa users-service
+kubectl scale deployment orders-service --replicas=3
+kubectl scale deployment products-service --replicas=3
+kubectl scale deployment users-service --replicas=3
+
+
+# Repetir la prueba de carga con K6
+k6 run k6/orders-test.js
+
+# ==============================================================================
+
+# Teardown
+
+# Detener todos los reenvíos de puertos
+pkill -f "kubectl port-forward"
+
+# Eliminar los recursos de Kubernetes (deployments, services, configmaps)
+kubectl delete -f users-service/users-deployment.yaml
+kubectl delete -f users-service/users-service.yaml
+kubectl delete -f products-service/products-deployment.yaml
+kubectl delete -f products-service/products-service.yaml
+kubectl delete -f orders-service/orders-deployment.yaml
+kubectl delete -f orders-service/orders-service.yaml
+kubectl delete -f api-gateway/api-gateway-deployment.yaml
+kubectl delete -f api-gateway/api-gateway-service.yaml
+
+kubectl delete configmap nginx-config
+
+# Eliminar las imágenes Docker creadas en Minikube
+eval $(minikube -p minikube docker-env)
+docker rmi orders-service:latest products-service:latest users-service:latest
+
+# Detener Minikube
+minikube stop
+
+# Restaurar el entorno Docker local
+eval $(minikube -p minikube docker-env -u)
+
+# Detener y eliminar los contenedores de bases de datos en Docker
+docker-compose down
+
+# Eliminar las imágenes locales de las bases de datos
+docker image prune -f
+
+# Detener Docker Desktop si lo iniciaste solo para la demo
+# En Mac/Linux:
+open -a Docker --args --shutdown
+# En Windows, cierra la aplicación Docker Desktop manualmente
+
+# ============================================================================
+
+# Estos comandos son sólo para depurar la aplicación; no es necesario
+# ejecutarlos si la demo funciona correctamente. Esta demo está configurada para
+# ser ejecutada desde la raíz de la carpeta del proyecto.
+
+# Crear un entorno virtual y activarlo
+python3 -m venv venv
+source venv/bin/activate
+
+# Instalar dependencias
+pip3 install -r ./orders-service/requirements.txt
+pip3 install -r ./products-service/requirements.txt
+pip3 install -r ./users-service/requirements.txt
+
+# Borra los datos de las bases de datos en caso de que sea necesario; no borres
+# estas carpetas si quieres conservar los datos de una ejecucion anterior.
+rm -rf ./orders-service/mysqldata
+rm -rf ./products-service/mongodbdata
+rm -rf ./users-service/pgdata
+
+# Iniciar Docker si no está iniciado
+docker desktop start
+
+# Levanta el contenedor con las bases de datos correspondientes a cada servicio
+docker compose -f ./orders-service/docker-compose.yaml up --build orders-db -d
+docker compose -f ./products-service/docker-compose.yaml up --build products-db -d
+docker compose -f ./users-service/docker-compose.yaml up --build users-db -d
+
+# Asegúrate de que el IDE está usando la versión de Python del entorno virtual
+# creado anteriormente; ejecuta Cmd+Shift+P o Ctrl+Shift+P y selecciona
+# "Python: Select Interpreter" o "Python: Seleccionar Intérprete"; luego elige
+# el intérprete que corresponde a la carpeta `venv` creada anteriormente.
+
+# Iniciar la depuración de uno de los servicios; y luego ejecutar en una nueva
+# terminal el comando correspondiente para probar que el servicio está
+# funcionando y se puede conectar a la base de datos:
+curl "http://localhost:8000/orders/"
+curl "http://localhost:8001/products/"
+curl "http://localhost:8002/users/"
+
+curl http://localhost:8000/users/1
+curl http://localhost:8000/products/60f7c2b5e1d3c2a1b8e4d123
+curl http://localhost:8000/orders/user/1
+
+# 2.a. Estos comandos son para ejecutar el servicio de órdenes y probarlo en
+# Docker
+
+# Borra los datos de la base de datos; no borres esta carpeta si quieres
+# conservar los datos de una ejecucion anterior.
+rm -rf ./orders-service/mysqldata
+
+# Iniciar Docker si no está iniciado
+docker desktop start
+
+# Levantar los dos servicios: la base de datos y el servicio de órdenes
+docker compose -f ./orders-service/docker-compose.yaml up --build -d
+
+# Prueba la conexión a la base de datos; te va a pedir una contraseña, mira el
+# archivo '.env' en la carpeta 'orders-service' para saber cuál es.
+docker exec -it orders-service-orders-db-1 mysql -u user -p ordersdb -e "SELECT * FROM orders;"
+
+# Probar el servicio. Puedes ver y probar todos los endpoints en
+# http://localhost:8000/docs
+curl "http://localhost:8000/orders/"
+
+# 2.b. Estos comandos son para ejecutar el servicio de productos y probarlo en
+# Docker
+
+# Borra los datos de la base de datos; no borres esta carpeta si quieres
+# conservar los datos de una ejecucion anterior.
+rm -rf ./products-service/mongodbdata
+
+# Iniciar Docker si no está iniciado
+docker desktop start
+
+# Levantar los dos servicios: la base de datos y el servicio de productos
+docker compose -f ./products-service/docker-compose.yaml up --build -d
+
+# Probar el servicio. Puedes ver y probar todos los endpoints en
+# http://localhost:8001/docs
+curl "http://localhost:8001/products/"
+
+# 2.c. Estos comandos son para ejecutar el servicio de usuarios y probarlo en
+# Docker
+
+# Borra los datos de la base de datos; no borrar esta carpeta si se quiere
+# conversar los datos de una ejecucion anterior.
+rm -rf ./users-service/pgdata
+
+# Iniciar Docker si no está iniciado
+docker desktop start
+
+# Levantar los dos servicios: la base de datos y el servicio de usuarios
+docker compose -f ./users-service/docker-compose.yaml up --build -d
+
+# Probar la conexión a la base de datos; te va a pedir una contraseña, mira el
+# archivo '.env' en la carpeta 'users-service' para saber cuál es.
+psql -h localhost -p 5432 -U usersusr -d usersdb -c "SELECT * FROM users;"
+
+curl "http://localhost:8002/users/"
+
+# 2.d Estos comandos son para detener los contenedores antes de pasar a la
+# siguiente parte 3
+docker stop $(docker ps -q)
+
+# 3. Levantar el API Gateway y probarlo
+docker compose up -d
+
+curl "http://localhost:8000/orders/"
+curl "http://localhost:8001/products/"
+curl "http://localhost:8002/users/"
