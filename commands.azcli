@@ -32,7 +32,8 @@ docker exec -it andis2_ut2_demo2-products-db-1 mongosh "mongodb://productsusr:Pa
 # Iniciar Kubernets; esperar el mensaje "Done! kubectl is now configured to use 'minikube'..."
 minikube start
 
-# Configurar que los comandos Docker usen el entorno de Docker interno de Minikube
+# Configurar el entorno para que los comandos `docker`  usen el ambiente de
+# Docker interno de Minikube
 eval $(minikube -p minikube docker-env)
 
 # Crear las imágenes en caso de que no estuvieran creadas
@@ -76,14 +77,14 @@ curl http://localhost:8080/products/
 curl http://localhost:8080/users/
 curl http://localhost:8080/orders/user/1
 
-# Abrir el dashboard de Minikube en el navegador; ordena los pods por nombre
-# para facilitar el análisis
-minikube dashboard
+# Puedes ver los pods en ejecución mientras haces la prueba de carga; para eso
+# ejecuta este comando en una nueva terminal:
+kubectl get pods --watch
 
 # En otra terminal, haz una prueba de carga con K6. La prueba dura dos minutos.
-# Mira el comportamiento de los pods en el dashboard. Los resultados de la
-# prueba aparecen al final del archivo ./k6/orders-test-resultados-iniciales.txt
-k6 run k6/orders-test.js > k6/orders-test-resultados-iniciales.txt
+# Mira el comportamiento de los pods en en la otra terminal. Los resultados de
+# la prueba aparecen al final del archivo k6/resultados-0.txt
+k6 run --quiet k6/orders-test.js > k6/resultados-0.txt
 
 # Habilitar métricas y auto-escalado al llegar al 50% de uso de CPU hasta 10
 # réplicas
@@ -91,37 +92,23 @@ kubectl autoscale deployment orders-service --cpu-percent=50 --min=1 --max=10
 kubectl autoscale deployment products-service --cpu-percent=50 --min=1 --max=10
 kubectl autoscale deployment users-service --cpu-percent=50 --min=1 --max=10
 
-# Repite la prueba de carga con K6; mira el comportamiento de los pods en el
-# dashboard; deberías ver cómo se crean más réplicas del servicio de órdenes
+# Repite la prueba de carga con K6; mira el comportamiento de los pods en la
+# otra terminal; deberías ver cómo se crean más réplicas del servicio de órdenes
 # cuando la carga aumenta
-k6 run k6/orders-test.js > k6/orders-test-resultados-50.txt
-
-# Es probable que veas un valor mayor de http_req_failed que en la primera
-# prueba; esto es porque en este ambiente de prueba, Kubernets tarda en levantar
-# los pods adicionales, y durante ese tiempo K6 sigue enviando solicitudes que
-# fallan. Has nuevamente la prueba, ahora que los pods adicionales ya están
-# todos levantados, y analiza las diferencias.
-k6 run k6/orders-test.js > k6/orders-test-resultados-50.txt
+k6 run --quiet k6/orders-test.js > k6/resultados-1.txt
 
 # Compara los resultados de las dos pruebas de carga; mira especialmente los
 # valores de http_req_duration y http_reqs
 
-# Cambiar el auto-escalado para que se active al llegar al 10% de uso de CPU
-# hasta 20 réplicas
-kubectl delete hpa orders-service
-kubectl delete hpa products-service
-kubectl delete hpa users-service
-kubectl autoscale deployment orders-service --cpu-percent=10 --min=1 --max=20
-kubectl autoscale deployment products-service --cpu-percent=10 --min=1 --max=20
-kubectl autoscale deployment users-service --cpu-percent=10 --min=1 --max=20
+# Es probable que veas un valor mayor de http_req_failed que en la primera
+# prueba; esto es porque en este ambiente de prueba, Kubernets tarda en levantar
+# los pods adicionales, y durante ese tiempo K6 sigue enviando solicitudes que
+# fallan. Haz nuevamente la prueba, ahora que los pods adicionales ya están
+# todos levantados, y analiza las diferencias.
+k6 run --quiet k6/orders-test.js > k6/resultados-2.txt
 
-# Repite la prueba de carga con K6; mira el comportamiento de los pods en el
-# dashboard; deberías ver cómo se crean más réplicas del servicio de órdenes
-# cuando la carga aumenta
-k6 run k6/orders-test.js > k6/orders-test-resultados-10.txt
-
-# Compara nuevamente los resultados de la primera y la última prueba de carga;
-# mira especialmente los valores de http_req_duration y http_reqs
+# Compara los resultados de las dos pruebas de carga; mira especialmente los
+# valores de http_req_duration y http_reqs
 
 # Restablecer el número de réplicas a 3 y eliminar el auto-escalado
 kubectl delete hpa orders-service
@@ -131,9 +118,8 @@ kubectl scale deployment orders-service --replicas=3
 kubectl scale deployment products-service --replicas=3
 kubectl scale deployment users-service --replicas=3
 
-
-# Repetir la prueba de carga con K6
-k6 run k6/orders-test.js
+# Opcionalmente, repetir la prueba de carga con K6
+k6 run --quiet k6/orders-test.js > k6/resultados-3.txt
 
 # ==============================================================================
 
@@ -158,17 +144,14 @@ kubectl delete configmap nginx-config
 eval $(minikube -p minikube docker-env)
 docker rmi orders-service:latest products-service:latest users-service:latest
 
-# Detener Minikube
-minikube stop
-
 # Restaurar el entorno Docker local
 eval $(minikube -p minikube docker-env -u)
 
-# Detener y eliminar los contenedores de bases de datos en Docker
-docker-compose down
+# Detener Minikube
+minikube stop
 
-# Eliminar las imágenes locales de las bases de datos
-docker image prune -f
+# Detener y eliminar los contenedores e imágenes de bases de datos en Docker
+docker-compose down --rmi all --volumes --remove-orphans
 
 # Detener Docker Desktop si lo iniciaste solo para la demo
 # En Mac/Linux:
@@ -262,7 +245,7 @@ curl "http://localhost:8001/products/"
 # Docker
 
 # Borra los datos de la base de datos; no borrar esta carpeta si se quiere
-# conversar los datos de una ejecucion anterior.
+# conversar los datos de una ejecución anterior.
 rm -rf ./users-service/pgdata
 
 # Iniciar Docker si no está iniciado

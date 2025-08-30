@@ -4,7 +4,7 @@
 
 ### Análisis y diseño de aplicaciones II
 
-# Demo de facilidad de modificación y de despliegue
+# Demo de desempeño
 
 El contexto de esta demo es un sitio de *e-commerce* en el que hay usuarios que
 compran productos mediante órdenes. La demo implementa una arquitectura de
@@ -14,10 +14,8 @@ microservicios, compuesta por varios servicios independientes llamados
 integrar en una única
 [interfaz](https://github.com/ucudal/ANDIS_Conceptos/blob/main/4_Conceptos/4_Interfaz.md)
 las interfaces de los servicios anteriores; la demo busca ilustrar en la
-práctica los conceptos de [facilidad de
-modificación](https://github.com/ucudal/ANDIS_Conceptos/blob/main/4_Conceptos/4_Facilidad_de_modificacion.md)
-y de
-[despliegue](https://github.com/ucudal/ANDIS_Conceptos/blob/main/4_Conceptos/4_Facilidad_de_despliegue.md)
+práctica una de las tácticas de
+[rendimiento](https://github.com/ucudal/ANDIS_Conceptos/blob/main/4_Conceptos/4_Rendimiento.md)
 en sistemas distribuidos modernos.
 
 ## Estructura del Proyecto
@@ -41,8 +39,11 @@ es posible ejecutar los comandos directamente desde Visual Studio Code.
 - Python
 - [Docker Desktop](https://docs.docker.com/desktop/)
 - [Minikube](https://minikube.sigs.k8s.io/docs/start/)
+- [K6](https://k6.io)
 
 ## Actividades
 
-Estudia los componentes de la demo y analiza cómo la forma en la que está
-implementada podría facilitar o dificultar la facilidad de modificación y de despliegue.
+Estudia los componentes de la demo, sobre todo el código de los microservicios
+implementado en los archivos `main.py` de las carpetas `orders-service`,
+`products-service` y `users-service`, y analiza cómo la forma en la que está
+implementada la táctica de réplicas.
