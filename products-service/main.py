@@ -5,11 +5,7 @@ from pymongo import MongoClient
 from bson.objectid import ObjectId
 from bson.errors import InvalidId
 
-
 app = FastAPI(title="Products Service")
-
-# MONGO_URL="mongodb://productsusr:Pa55w0rd@localhost:27017/productsdb"
-# client = MongoClient(MONGO_URL)
 
 MONGO_HOST = os.environ.get("MONGO_HOST", "localhost")
 MONGO_PORT = int(os.environ.get("MONGO_PORT", 27017));
@@ -27,17 +23,14 @@ client = MongoClient(
 db = client["productsdb"]
 products_collection = db["products"]
 
-
 class Product(BaseModel):
     name: str
     price: float
-
 
 @app.post("/products/")
 def create_product(product: Product):
     result = products_collection.insert_one(product.dict())
     return {"id": str(result.inserted_id), "msg": "Product created"}
-
 
 @app.get("/products/")
 def list_products():
@@ -46,7 +39,6 @@ def list_products():
         prod["_id"] = str(prod["_id"])
         products.append(prod)
     return products
-
 
 @app.get("/products/{product_id}")
 def get_product(product_id: str):
@@ -59,4 +51,3 @@ def get_product(product_id: str):
         raise HTTPException(status_code=404, detail="Product not found")
     prod["_id"] = str(prod["_id"])
     return prod
-

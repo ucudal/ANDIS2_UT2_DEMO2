@@ -7,7 +7,6 @@ import pymysql
 
 import requests
 
-
 app = FastAPI(title="Orders Service")
 
 MYSQL_USER = os.getenv("MYSQL_USER", "user")
@@ -64,16 +63,6 @@ def list_orders():
       return orders
     except Exception as e:
       raise HTTPException(status_code=500, detail=str(e))
-
-
-# # Configuración de la base de datos
-# db_config = {
-#     'host': 'host.docker.internal',
-#     'user': 'user',
-#     'password': 'Pa55w0rd',
-#     'database': 'ordersdb',
-#     'port': 3306
-# }
 
 @app.get("/orders/user/{user_id}")
 def get_orders_by_user(user_id: int):
